@@ -121,7 +121,15 @@ function startWeb({ getDb, save, client, storageDir, brand, port }) {
   app.use(express.static(path.join(__dirname, 'site'), { etag: true, maxAge: 0 }));
   app.use((req, res) => res.status(404).type('text').send('Página não encontrada.'));
 
-  app.listen(port, '0.0.0.0', () => console.log(`🌐 Site no ar na porta ${port} (${process.env.PUBLIC_URL || `http://localhost:${port}`})`));
+  const listenPort = Number(process.env.PORT || port || 8080);
+
+const server = app.listen(listenPort, '0.0.0.0', () => {
+  console.log(`🌐 Site no ar na porta ${listenPort}`);
+});
+
+server.on('error', (err) => {
+  console.error('❌ Erro ao iniciar o servidor web:', err);
+});
 
   return { broadcast };
 }
