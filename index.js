@@ -700,4 +700,12 @@ async function onModal(i) {
 }
 
 process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
+// Encerramento limpo (o Railway manda SIGTERM a cada deploy/reinício)
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, async () => {
+    console.log(`Recebi ${sig}, salvando e encerrando...`);
+    try { save(); await client.destroy(); } finally { process.exit(0); }
+  });
+}
+
 client.login(process.env.TOKEN);
