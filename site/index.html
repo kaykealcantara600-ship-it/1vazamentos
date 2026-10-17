@@ -1,699 +1,520 @@
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { Readable } = require('stream');
-const { pipeline } = require('stream/promises');
-const { startWeb } = require('./web');
-const {
-  Client, GatewayIntentBits, Events, MessageFlags, PermissionFlagsBits, ChannelType,
-  SlashCommandBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize,
-  ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, ChannelSelectMenuBuilder,
-  RoleSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, FileBuilder,
-} = require('discord.js');
-
-/* ============================ CONFIG BÁSICA ============================ */
-const BRAND = '1 Vazamentos';
-const COLOR = 0x5865f2, OK = 0x57f287, RED = 0xed4245, WARN = 0xfee75c;
-const V2 = MessageFlags.IsComponentsV2;
-const EPH = MessageFlags.Ephemeral;
-
-// Site de downloads (sincronizado com o bot)
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
-
-// Discord só aceita em botão de link: http(s), domínio real (não localhost/IP local) e até 512 caracteres
-function cleanUrl(u) {
-  try {
-    const x = new URL(String(u).trim());
-    if (!/^https?:$/.test(x.protocol)) return null;
-    if (!x.hostname.includes('.') || /^(localhost|127\.|10\.|192\.168\.)/i.test(x.hostname)) return null;
-    return x.href.length <= 512 ? x.href : null;
-  } catch { return null; }
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1 Vazamentos — Central de Downloads</title>
+<meta name="description" content="Sources, bots e scripts hospedados direto, sincronizados em tempo real com o Discord do 1 Vazamentos.">
+<meta name="theme-color" content="#06070a">
+<meta property="og:title" content="1 Vazamentos — Central de Downloads">
+<meta property="og:description" content="Baixe direto. Sem link quebrado. Atualizado em tempo real pelo bot do Discord.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23b8ff5a'/%3E%3Cpath d='M13 10l4-2v16' stroke='%2307100a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#06070a; --card:rgba(255,255,255,.035); --card-hi:rgba(255,255,255,.065);
+  --line:rgba(255,255,255,.08); --line-hi:rgba(255,255,255,.17);
+  --text:#eceff5; --mute:#8d96a8; --dim:#626b7d;
+  --a:#b8ff5a; --a2:#4de8c2; --blue:#5b7bff; --danger:#ff5d6c;
+  --grad:linear-gradient(135deg,var(--a),var(--a2));
+  --r:18px;
+  --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --display:'Space Grotesk','Inter',system-ui,sans-serif;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
 }
-const PUBLIC_OK = !!PUBLIC_URL && !!cleanUrl(PUBLIC_URL);
-if (PUBLIC_URL && !PUBLIC_OK) console.warn('⚠️ PUBLIC_URL é local ou inválida: o site funciona, mas os botões de link no Discord ficam ocultos.');
-const STORAGE_DIR = path.join(__dirname, 'storage');
-fs.mkdirSync(STORAGE_DIR, { recursive: true });
-const MAX_FILE_BYTES = (Number(process.env.MAX_FILE_MB) || 200) * 1024 * 1024;
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth;color-scheme:dark}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit}
+button,input,select{font-family:inherit}
+:focus-visible{outline:2px solid var(--a);outline-offset:3px;border-radius:8px}
+::selection{background:rgba(184,255,90,.3)}
 
-// Valores fixos (usados se ainda não foram definidos pelo /painel)
-const DEFAULTS = {
-  canal_pedidos: '1560822113462521927', // pedidos de bot
-  cargo_staff: '1496757100930666596',   // seu cargo (único mencionado nos carrinhos/tickets)
-};
+/* ---------- fundo ---------- */
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.gridbg{position:absolute;inset:0;opacity:.55;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 70% 55% at 50% 0%,#000 25%,transparent 75%);
+  mask-image:radial-gradient(ellipse 70% 55% at 50% 0%,#000 25%,transparent 75%)}
+.orb{position:absolute;border-radius:50%;filter:blur(120px);animation:float 20s ease-in-out infinite}
+.o1{width:520px;height:520px;background:var(--a);top:-240px;left:-140px;opacity:.15}
+.o2{width:600px;height:600px;background:var(--blue);top:60px;right:-240px;opacity:.2;animation-delay:-7s}
+.o3{width:480px;height:480px;background:var(--a2);bottom:-260px;left:30%;opacity:.1;animation-delay:-12s}
+.grain{position:absolute;inset:0;opacity:.07;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
-/* ============================ BANCO (JSON) ============================ */
-const DB_PATH = path.join(__dirname, 'data.json');
-let db = { config: {}, requests: {}, tickets: {}, sources: {} };
-try { db = { ...db, ...JSON.parse(fs.readFileSync(DB_PATH, 'utf8')) }; } catch {}
-const save = () => fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-for (const [k, v] of Object.entries(DEFAULTS)) if (!db.config[k]) db.config[k] = v;
-save();
+/* ---------- nav ---------- */
+.nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);background:rgba(6,7,10,.62);border-bottom:1px solid var(--line)}
+.nav-in{max-width:1180px;margin:auto;padding:13px 24px;display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font:700 18px var(--display);letter-spacing:-.01em}
+.brand svg{width:30px;height:30px}
+.sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--mute);background:var(--card);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block}
+.pill.on .dot,.dot.live{background:var(--a);animation:pulse 2s infinite}
+.pill.off .dot{background:var(--danger)}
+.pill.on{color:var(--text)}
 
-/* ============================ HELPERS DE UI ============================ */
-const text = (s) => new TextDisplayBuilder().setContent(s);
-const sep = (big = false) => new SeparatorBuilder().setDivider(true)
-  .setSpacing(big ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small);
-const row = (...c) => new ActionRowBuilder().addComponents(...c);
-const btn = (id, label, style = ButtonStyle.Secondary, emoji) => {
-  const b = new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
-  if (emoji) b.setEmoji(emoji);
-  return b;
-};
-function box(color, ...items) {
-  const c = new ContainerBuilder().setAccentColor(color);
-  for (const x of items.flat()) {
-    if (!x) continue;
-    if (x instanceof TextDisplayBuilder) c.addTextDisplayComponents(x);
-    else if (x instanceof SeparatorBuilder) c.addSeparatorComponents(x);
-    else if (x instanceof ActionRowBuilder) c.addActionRowComponents(x);
-    else if (x instanceof FileBuilder) c.addFileComponents(x);
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:600 14px var(--font);cursor:pointer;text-decoration:none;transition:transform .2s,background .2s,border-color .2s,box-shadow .2s;white-space:nowrap}
+.btn:hover{background:var(--card-hi);border-color:var(--line-hi);transform:translateY(-1px)}
+.btn svg{width:16px;height:16px;flex:none}
+.btn.pri{background:var(--grad);color:#08110a;border-color:transparent;box-shadow:0 8px 28px -10px rgba(184,255,90,.55)}
+.btn.pri:hover{filter:brightness(1.06);box-shadow:0 12px 34px -10px rgba(184,255,90,.75)}
+.banner{background:rgba(255,93,108,.12);border-bottom:1px solid rgba(255,93,108,.3);color:#ffb3ba;text-align:center;padding:9px 16px;font-size:13.5px}
+
+/* ---------- hero ---------- */
+.wrap{max-width:1180px;margin:auto;padding:0 24px}
+.hero{padding:88px 0 20px;text-align:center}
+.eyebrow{display:inline-flex;gap:9px;align-items:center;font:600 11.5px var(--font);letter-spacing:.14em;text-transform:uppercase;color:var(--a);padding:7px 14px;border:1px solid rgba(184,255,90,.25);background:rgba(184,255,90,.06);border-radius:999px}
+h1{font:700 clamp(42px,7.4vw,82px)/1.02 var(--display);letter-spacing:-.04em;margin:24px 0 20px}
+h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{max-width:600px;margin:0 auto;color:var(--mute);font-size:18px}
+.search{position:relative;display:block;max-width:660px;margin:38px auto 0}
+.search input{width:100%;height:60px;padding:0 64px 0 54px;border-radius:18px;border:1px solid var(--line-hi);background:rgba(255,255,255,.045);color:var(--text);font:500 16px var(--font);outline:none;transition:border-color .2s,box-shadow .2s;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.search input::placeholder{color:var(--dim)}
+.search input:focus{border-color:rgba(184,255,90,.55);box-shadow:0 0 0 5px rgba(184,255,90,.1)}
+.search>svg{position:absolute;left:19px;top:50%;transform:translateY(-50%);width:20px;height:20px;color:var(--mute)}
+kbd{position:absolute;right:16px;top:50%;transform:translateY(-50%);font:600 12px var(--mono);color:var(--mute);border:1px solid var(--line-hi);border-bottom-width:2px;border-radius:7px;padding:3px 8px;background:rgba(255,255,255,.04)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:46px auto 0;max-width:880px}
+.stat{padding:18px 16px;border:1px solid var(--line);border-radius:16px;background:var(--card);text-align:left}
+.stat b{display:block;font:700 30px var(--display);letter-spacing:-.025em;font-variant-numeric:tabular-nums}
+.stat span{font-size:12.5px;color:var(--mute)}
+
+/* ---------- barra de filtros ---------- */
+.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:46px 0 8px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:240px}
+.chip{height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--mute);font:600 13px var(--font);cursor:pointer;transition:.2s}
+.chip:hover{color:var(--text);border-color:var(--line-hi)}
+.chip[aria-pressed=true]{color:#08110a;background:var(--grad);border-color:transparent}
+.chip small{opacity:.65;margin-left:7px;font-weight:600}
+.sel{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+.sel select{height:38px;border-radius:11px;border:1px solid var(--line);background:#0e1015;color:var(--text);padding:0 12px;font:600 13px var(--font);cursor:pointer}
+.count{font-size:13px;color:var(--dim);margin:6px 2px 16px}
+
+/* ---------- cards ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;padding-bottom:90px}
+.card{position:relative;display:flex;flex-direction:column;gap:14px;padding:20px;border-radius:var(--r);border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.02));cursor:pointer;overflow:hidden;transition:transform .25s,border-color .25s,box-shadow .25s;animation:rise .55s cubic-bezier(.2,.8,.2,1) both}
+.card::before{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(184,255,90,.11),transparent 45%);opacity:0;transition:opacity .3s;pointer-events:none}
+.card:hover{transform:translateY(-3px);border-color:var(--line-hi);box-shadow:0 24px 50px -28px rgba(0,0,0,.9)}
+.card:hover::before{opacity:1}
+.card.fresh{border-color:rgba(184,255,90,.65);box-shadow:0 0 0 5px rgba(184,255,90,.09)}
+.top{display:flex;gap:14px;align-items:center;min-width:0}
+.ttl{min-width:0;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.card h3{max-width:100%;font:600 17px var(--display);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ext{flex:none;width:50px;height:50px;border-radius:14px;display:grid;place-items:center;font:700 12px/1 var(--mono);letter-spacing:.02em;
+  background:linear-gradient(135deg,hsl(var(--h) 85% 60%/.24),hsl(var(--h) 85% 60%/.05));
+  border:1px solid hsl(var(--h) 85% 62%/.38);color:hsl(var(--h) 95% 74%)}
+.ext.lg{width:62px;height:62px;border-radius:18px;font-size:14px}
+.tag{display:inline-block;font:600 11px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--a2);background:rgba(77,232,194,.09);border:1px solid rgba(77,232,194,.22);border-radius:7px;padding:2px 8px}
+.card p{color:var(--mute);font-size:14px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;min-height:64px;white-space:pre-line}
+.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--dim);font-size:12.5px}
+.meta span{display:inline-flex;gap:6px;align-items:center}
+.meta svg{width:14px;height:14px}
+.foot{display:flex;gap:8px;margin-top:auto}
+.foot .btn{flex:1}
+
+.sk{height:276px;border-radius:var(--r);border:1px solid var(--line);background:linear-gradient(100deg,rgba(255,255,255,.03) 30%,rgba(255,255,255,.07) 50%,rgba(255,255,255,.03) 70%);background-size:300% 100%;animation:shimmer 1.4s infinite linear}
+.empty{grid-column:1/-1;text-align:center;padding:72px 20px;border:1px dashed var(--line-hi);border-radius:var(--r);background:var(--card)}
+.empty .ic{width:56px;height:56px;margin:0 auto 18px;border-radius:16px;display:grid;place-items:center;background:rgba(184,255,90,.08);border:1px solid rgba(184,255,90,.25);color:var(--a)}
+.empty .ic svg{width:26px;height:26px}
+.empty h3{font:600 20px var(--display);margin-bottom:6px}
+.empty p{color:var(--mute);max-width:420px;margin:0 auto 18px}
+
+/* ---------- modal ---------- */
+dialog{border:none;background:transparent;color:inherit;width:min(640px,calc(100vw - 28px));padding:0;margin:auto;overflow:visible}
+dialog::backdrop{background:rgba(3,4,6,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+dialog[open]{animation:pop .3s cubic-bezier(.2,.9,.3,1.15)}
+.sheet{position:relative;border:1px solid var(--line-hi);border-radius:26px;background:linear-gradient(180deg,#141720,#0b0d12);padding:30px;box-shadow:0 50px 120px -20px #000,0 0 0 1px rgba(255,255,255,.02) inset;max-height:calc(100vh - 40px);overflow:auto}
+.sheet h2{font:700 26px var(--display);letter-spacing:-.025em;line-height:1.15;word-break:break-word}
+.sheet .x{position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--mute);cursor:pointer;display:grid;place-items:center;transition:.2s}
+.sheet .x:hover{color:var(--text);background:var(--card-hi)}
+.sheet .x svg{width:16px;height:16px}
+.sheet .top{padding-right:44px}
+.desc{margin:22px 0;color:#c4cad6;white-space:pre-wrap;word-break:break-word;font-size:15px}
+.desc a{color:var(--a);text-underline-offset:3px}
+.facts{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:24px}
+.facts div{padding:12px 14px;border-radius:13px;background:var(--card);border:1px solid var(--line);min-width:0}
+.facts dt{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.facts dd{font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.actions .btn{height:46px;flex:1;min-width:150px}
+
+/* ---------- toasts ---------- */
+#toasts{position:fixed;right:18px;bottom:18px;z-index:100;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{display:flex;gap:12px;align-items:center;min-width:260px;max-width:340px;padding:13px 16px;border-radius:14px;border:1px solid var(--line-hi);background:rgba(16,18,25,.92);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 20px 50px -15px #000;animation:toastin .35s cubic-bezier(.2,.9,.3,1.1)}
+.toast.out{animation:toastout .3s forwards}
+.toast .tdot{width:9px;height:9px;border-radius:50%;background:var(--a);flex:none;box-shadow:0 0 14px var(--a)}
+.toast b{display:block;font-size:13.5px}
+.toast span{display:block;font-size:12.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px}
+
+footer{border-top:1px solid var(--line);padding:30px 24px;text-align:center;color:var(--dim);font-size:13px}
+footer a{color:var(--mute);text-underline-offset:3px}
+
+@keyframes float{50%{transform:translate(40px,30px) scale(1.08)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(184,255,90,.55)}70%{box-shadow:0 0 0 9px rgba(184,255,90,0)}100%{box-shadow:0 0 0 0 rgba(184,255,90,0)}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes pop{from{opacity:0;transform:translateY(16px) scale(.96)}}
+@keyframes shimmer{to{background-position:-300% 0}}
+@keyframes toastin{from{opacity:0;transform:translateX(30px)}}
+@keyframes toastout{to{opacity:0;transform:translateX(30px)}}
+
+@media(max-width:720px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .hero{padding-top:58px}
+  .nav .pill{display:none}
+  .facts{grid-template-columns:1fr}
+  .sheet{padding:22px}
+  #toasts{left:14px;right:14px}.toast{max-width:none}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"><div class="gridbg"></div><i class="orb o1"></i><i class="orb o2"></i><i class="orb o3"></i><div class="grain"></div></div>
+
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/" aria-label="1 Vazamentos">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b8ff5a"/><stop offset="1" stop-color="#4de8c2"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M13 10l4-2v16" stroke="#07100a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      <span>1 Vazamentos</span>
+    </a>
+    <span class="sp"></span>
+    <span class="pill" id="pill"><i class="dot"></i><span id="pilltxt">Conectando…</span></span>
+    <a class="btn pri" id="invite" href="#" target="_blank" rel="noopener noreferrer" hidden>Entrar no Discord</a>
+  </div>
+</header>
+<div class="banner" id="offline" hidden>Sem conexão com o servidor. Tentando reconectar…</div>
+
+<main class="wrap">
+  <section class="hero">
+    <span class="eyebrow"><i class="dot live"></i> Central de downloads · ao vivo</span>
+    <h1>Baixe direto.<br><em>Sem link quebrado.</em></h1>
+    <p class="lead">Tudo hospedado aqui e sincronizado em tempo real com o nosso Discord. Lançou no bot, apareceu no site.</p>
+    <label class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Buscar por nome, categoria ou descrição…" autocomplete="off" spellcheck="false" aria-label="Buscar">
+      <kbd>/</kbd>
+    </label>
+    <div class="stats">
+      <div class="stat"><b id="st-src" data-v="0">0</b><span>Sources no ar</span></div>
+      <div class="stat"><b id="st-dl" data-v="0">0</b><span>Downloads</span></div>
+      <div class="stat"><b id="st-size" data-v="0">0 B</b><span>Hospedado</span></div>
+      <div class="stat"><b id="st-mem" data-v="0">—</b><span>Membros no Discord</span></div>
+    </div>
+  </section>
+
+  <section aria-label="Sources">
+    <div class="bar">
+      <div class="chips" id="chips"></div>
+      <label class="sel"><span>Ordenar</span>
+        <select id="sort" aria-label="Ordenar">
+          <option value="recent">Mais recentes</option>
+          <option value="popular">Mais baixadas</option>
+          <option value="name">Nome (A–Z)</option>
+        </select>
+      </label>
+    </div>
+    <div class="count" id="count"></div>
+    <div class="cards" id="list" aria-live="polite"></div>
+  </section>
+  <noscript><p style="color:var(--mute);text-align:center;padding:40px">Ative o JavaScript para ver as sources.</p></noscript>
+</main>
+
+<footer>
+  <div>© <span id="yr"></span> 1 Vazamentos · Créditos: 1 Vazamentos</div>
+  <div id="contactline" style="margin-top:6px" hidden>Quer remover algo? <a id="contact" href="#" target="_blank" rel="noopener noreferrer">Fale com a administração</a></div>
+</footer>
+
+<dialog id="modal" aria-label="Detalhes da source"><div class="sheet" id="sheet"></div></dialog>
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+
+/* ---------- helpers ---------- */
+const h = (tag, props = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
   }
-  return c;
-}
-const deny = (i, msg) => i.reply({ flags: V2 | EPH, components: [box(RED, text(`❌ ${msg}`))] });
-const isStaff = (m) => !!m && (
-  m.permissions.has(PermissionFlagsBits.Administrator) ||
-  (db.config.cargo_staff && m.roles.cache.has(db.config.cargo_staff))
-);
-function modal(id, title, fields) {
-  return new ModalBuilder().setCustomId(id).setTitle(title).addComponents(
-    fields.map((f) => {
-      const t = new TextInputBuilder().setCustomId(f.id).setLabel(f.label)
-        .setStyle(f.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
-        .setRequired(f.required !== false).setMaxLength(f.max || 800);
-      if (f.ph) t.setPlaceholder(f.ph);
-      return row(t);
-    })
-  );
-}
-
-const MODALS = {
-  bot: () => modal('m:bot', 'Pedir um bot', [
-    { id: 'desc', label: 'Descrição do bot', long: true, max: 900 },
-    { id: 'faz', label: 'O que ele faz?', long: true, max: 900 },
-    { id: 'mais', label: 'O que mais você quer? (opcional)', long: true, required: false, max: 900 },
-  ]),
-  sug: () => modal('m:sug', 'Sugestão para o servidor', [
-    { id: 'sug', label: 'O que devemos melhorar ou aprimorar?', long: true, max: 1500 },
-  ]),
-  cargo: () => modal('m:cargo', 'Cargo próprio', [
-    { id: 'nome', label: 'Nome do cargo', max: 50 },
-    { id: 'cor', label: 'Cor em HEX', max: 7, ph: '#ff0066' },
-  ]),
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
 };
-
-/* ============================ PAINEL DE CONFIG (/painel) ============================ */
-const LABELS = {
-  canal_pedidos: 'Canal de pedidos de bot', canal_sugestoes: 'Canal de sugestões',
-  canal_cargos: 'Canal de pedidos de cargo', canal_sources: 'Canal de sources',
-  canal_logs: 'Canal de logs (tickets/carrinhos)', categoria_tickets: 'Categoria dos tickets e carrinhos',
-  cargo_staff: 'Cargo da staff (o único mencionado)', cargo_vip: 'Cargo VIP',
+const P = {
+  dl: '<path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  box: '<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
+  link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  empty: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
 };
-
-function configPanel() {
-  const c = db.config;
-  const ch = (k) => (c[k] ? `<#${c[k]}>` : '`não definido`');
-  const ro = (k) => (c[k] ? `<@&${c[k]}>` : '`não definido`');
-  return box(COLOR,
-    text(`# ${BRAND}\n-# Painel de configuração`), sep(),
-    text(
-      `**Canais**\n` +
-      `🤖 Pedidos de bot: ${ch('canal_pedidos')}\n💡 Sugestões: ${ch('canal_sugestoes')}\n` +
-      `🎨 Pedidos de cargo: ${ch('canal_cargos')} *(se vazio, usa o de pedidos de bot)*\n` +
-      `📦 Sources: ${ch('canal_sources')}\n📜 Logs: ${ch('canal_logs')}\n🎫 Categoria de tickets/carrinhos: ${ch('categoria_tickets')}\n\n` +
-      `**Cargos**\n🛡️ Staff: ${ro('cargo_staff')}\n💎 VIP: ${ro('cargo_vip')}`
-    ), sep(),
-    row(
-      btn('cfg:canal_pedidos', 'Pedidos', ButtonStyle.Secondary, '🤖'),
-      btn('cfg:canal_sugestoes', 'Sugestões', ButtonStyle.Secondary, '💡'),
-      btn('cfg:canal_cargos', 'Cargos', ButtonStyle.Secondary, '🎨'),
-      btn('cfg:canal_sources', 'Sources', ButtonStyle.Secondary, '📦'),
-      btn('cfg:canal_logs', 'Logs', ButtonStyle.Secondary, '📜'),
-    ),
-    row(
-      btn('cfg:categoria_tickets', 'Categoria', ButtonStyle.Secondary, '🎫'),
-      btn('cfg:cargo_staff', 'Cargo staff', ButtonStyle.Secondary, '🛡️'),
-      btn('cfg:cargo_vip', 'Cargo VIP', ButtonStyle.Secondary, '💎'),
-    ), sep(),
-    row(
-      btn('src:novo', 'Lançar source', ButtonStyle.Success, '🚀'),
-      btn('painel:publicar', 'Publicar painel aqui', ButtonStyle.Primary, '📌'),
-    ),
-    text(`-# Créditos: ${BRAND}`)
-  );
-}
-
-/* ============================ PAINEL PÚBLICO (MENU DE SELEÇÃO) ============================ */
-function publicPanel() {
-  const menu = new StringSelectMenuBuilder().setCustomId('panel:menu').setPlaceholder('Selecione uma opção...')
-    .addOptions(
-      { label: 'Pedir bot', value: 'bot', description: 'Peça um bot para a administração', emoji: '🤖' },
-      { label: 'Sugestão', value: 'sug', description: 'Diga o que podemos melhorar no servidor', emoji: '💡' },
-      { label: 'Cargo próprio', value: 'cargo', description: 'Cargo personalizado (precisa de aprovação)', emoji: '🎨' },
-      { label: 'Comprar VIP', value: 'vip', description: 'Abre um carrinho para finalizar a compra', emoji: '💎' },
-      { label: 'Abrir ticket', value: 'ticket', description: 'Atendimento privado com a staff', emoji: '🎫' },
-    );
-  return box(COLOR,
-    text(`# ${BRAND}`),
-    text('Bem-vindo(a)! Escolha uma opção no menu abaixo.'), sep(),
-    text(
-      '🤖 **Pedir bot** — peça um bot para a administração\n' +
-      '💡 **Sugestão** — diga o que podemos melhorar no servidor\n' +
-      '🎨 **Cargo próprio** — peça um cargo personalizado\n' +
-      '💎 **Comprar VIP** — abra um carrinho e finalize a compra\n' +
-      '🎫 **Ticket** — atendimento privado com a staff'
-    ), sep(),
-    row(menu),
-    text(`-# Créditos: ${BRAND}`)
-  );
-}
-
-/* ============================ PEDIDOS (bot / cargo) ============================ */
-const KIND = {
-  bot: { title: '🤖 Pedido de bot', ch: 'canal_pedidos' },
-  cargo: { title: '🎨 Pedido de cargo próprio', ch: 'canal_cargos' },
+const svg = (n) => {
+  const t = document.createElement('template');
+  t.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+  return t.content.firstChild;
 };
+const nf = new Intl.NumberFormat('pt-BR');
+const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
+const fmtBytes = (n) => {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)).toString().replace('.', ',') + ' ' + u[i];
+};
+const ago = (ts) => {
+  const s = (ts - Date.now()) / 1000, a = Math.abs(s);
+  if (a < 60) return 'agora mesmo';
+  if (a < 3600) return rtf.format(Math.round(s / 60), 'minute');
+  if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour');
+  if (a < 2592000) return rtf.format(Math.round(s / 86400), 'day');
+  if (a < 31536000) return rtf.format(Math.round(s / 2592000), 'month');
+  return rtf.format(Math.round(s / 31536000), 'year');
+};
+const extOf = (s) => (s.file ? (s.file.name.includes('.') ? s.file.name.split('.').pop() : 'file') : 'url').slice(0, 4).toUpperCase();
+const hue = (str) => { let x = 0; for (const c of str) x = (x * 31 + c.charCodeAt(0)) % 360; return x; };
+const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? u : '#');
 
-function requestCard(id) {
-  const r = db.requests[id];
-  const done = r.status !== 'pendente';
-  const status = !done ? '⏳ Pendente'
-    : r.status === 'aprovado' ? `✅ Aprovado por <@${r.by}>` : `❌ Recusado por <@${r.by}>`;
-  return box(done ? (r.status === 'aprovado' ? OK : RED) : COLOR,
-    text(`# ${KIND[r.kind].title}\n-# ${BRAND}`), sep(),
-    text(`**Solicitante:** <@${r.user}>\n\n` + r.fields.map(([k, v]) => `**${k}**\n${v}`).join('\n\n')), sep(),
-    text(`**Status:** ${status}`),
-    !done && row(btn(`rq:ok:${id}`, 'Aprovar', ButtonStyle.Success, '✅'), btn(`rq:no:${id}`, 'Recusar', ButtonStyle.Danger, '❌'))
-  );
+function linkify(t) {
+  const out = []; const re = /https?:\/\/[^\s<]+/g; let last = 0, m;
+  while ((m = re.exec(t))) {
+    if (m.index > last) out.push(t.slice(last, m.index));
+    const url = m[0].replace(/[.,;:!?)]+$/, '');
+    out.push(h('a', { href: url, target: '_blank', rel: 'noopener noreferrer nofollow' }, url));
+    last = m.index + url.length; re.lastIndex = last;
+  }
+  if (last < t.length) out.push(t.slice(last));
+  return out;
 }
 
-async function sendRequest(i, kind, fields, data = {}) {
-  const chId = db.config[KIND[kind].ch] || (kind === 'cargo' ? db.config.canal_pedidos : null);
-  const ch = chId && (await i.guild.channels.fetch(chId).catch(() => null));
-  if (!ch) return deny(i, 'Esse recurso ainda não foi configurado. Avise a administração.');
-  const id = Date.now().toString(36) + Math.floor(Math.random() * 99);
-  db.requests[id] = { kind, user: i.user.id, fields, data, status: 'pendente' };
-  save();
-  await ch.send({ flags: V2, components: [requestCard(id)], allowedMentions: { parse: [] } });
-  return i.reply({
-    flags: V2 | EPH,
-    components: [box(OK, text(kind === 'cargo'
-      ? '✅ Pedido enviado! Os administradores precisam aprovar e você será avisado(a) por DM.'
-      : '✅ Pedido enviado para a administração! Você será avisado(a) por DM.'))],
-  });
-}
-
-/* ============================ SUGESTÕES ============================ */
-function sugCard(id) {
-  const r = db.requests[id];
-  const v = Object.values(r.votes || {});
-  const up = v.filter((x) => x === 1).length, down = v.filter((x) => x === -1).length;
-  return box(COLOR,
-    text(`# 💡 Sugestão\n-# ${BRAND}`), sep(),
-    text(`**De:** <@${r.user}>\n\n${r.fields[0][1]}`), sep(),
-    row(btn(`sug:up:${id}`, String(up), ButtonStyle.Success, '👍'), btn(`sug:down:${id}`, String(down), ButtonStyle.Danger, '👎'))
-  );
-}
-
-/* ============================ SOURCES ============================ */
-async function storeFile(att, id) {
-  if (att.size > MAX_FILE_BYTES) throw new Error(`arquivo maior que o limite de ${Math.round(MAX_FILE_BYTES / 1048576)} MB`);
-  const safe = att.name.replace(/[^\w.\-]/g, '_');
-  const stored = `${id}_${safe}`;
-  const res = await fetch(att.url);
-  if (!res.ok || !res.body) throw new Error('não consegui baixar o arquivo do Discord');
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(path.join(STORAGE_DIR, stored)));
-  return { name: att.name, stored, size: att.size };
-}
-
-async function publishSource(guild, user, { nome, desc, cat, link, file }) {
-  const ch = db.config.canal_sources && (await guild.channels.fetch(db.config.canal_sources).catch(() => null));
-  if (!ch) throw new Error('canal de sources não configurado');
-  const id = crypto.randomBytes(5).toString('hex');
-  const rec = {
-    id, nome, desc, cat: cat || 'Outros', link: link || null, file: null,
-    by: { id: user.id, tag: user.username }, at: Date.now(), downloads: 0,
+function countTo(el, to, fmt = nf.format) {
+  const from = Number(el.dataset.v || 0); el.dataset.v = to;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now(), d = 900;
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / d), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmt(Math.round(from + (to - from) * e));
+    if (p < 1) requestAnimationFrame(step);
   };
-
-  let att = null, fb = null;
-  if (file) {
-    if (PUBLIC_URL) {
-      rec.file = await storeFile(file, id); // hospedado no site
-    } else {
-      const safe = file.name.replace(/[^\w.\-]/g, '_'); // sem site: anexa direto no Discord
-      att = new AttachmentBuilder(file.url, { name: safe });
-      fb = new FileBuilder().setURL(`attachment://${safe}`);
-    }
-  }
-
-  const buttons = [];
-  if (rec.file && PUBLIC_OK) buttons.push(new ButtonBuilder().setLabel('Baixar').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/download/${id}`).setEmoji('⬇️'));
-  if (link) buttons.push(new ButtonBuilder().setLabel('Baixar').setStyle(ButtonStyle.Link).setURL(link).setEmoji('⬇️'));
-  if (PUBLIC_OK && (rec.file || link)) buttons.push(new ButtonBuilder().setLabel('Ver no site').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/#${id}`).setEmoji('🌐'));
-  buttons.push(btn(`srcdel:${id}`, 'Remover', ButtonStyle.Danger, '🗑️'));
-
-  const info = [`**Categoria:** ${rec.cat}`];
-  if (rec.file) info.push(`**Tamanho:** ${(rec.file.size / 1048576).toFixed(1)} MB`);
-
-  const card = box(COLOR,
-    text(`# 📦 ${nome}\n-# ${BRAND}`), sep(),
-    text(desc), sep(),
-    text(info.join('  •  ')),
-    fb,
-    row(...buttons),
-    text(`-# Créditos: ${BRAND} • Lançado por <@${user.id}>`)
-  );
-
-  let msg;
-  try {
-    msg = await ch.send({ flags: V2, components: [card], files: att ? [att] : [], allowedMentions: { parse: [] } });
-  } catch (e) {
-    if (rec.file) fs.rm(path.join(STORAGE_DIR, rec.file.stored), { force: true }, () => {});
-    throw e;
-  }
-  rec.msg = { channel: ch.id, id: msg.id };
-  db.sources[id] = rec; save();
-  web.broadcast('new', id);
-  return msg;
+  requestAnimationFrame(step);
 }
 
-/* ============================ TICKETS E CARRINHOS ============================ */
-const CATS = {
-  suporte: 'Suporte', bot: 'Pedido de bot', vip: 'Dúvida VIP / Pagamento',
-  parceria: 'Parceria', denuncia: 'Denúncia', outro: 'Outro', carrinho: 'Carrinho VIP',
-};
-
-// "IA" local sem API: palavras-chave -> resposta automática (1x por assunto por ticket)
-const FAQ = [
-  ['vip', /vip|premium|assinatura|assinar/, '💎 Para comprar o VIP, selecione **Comprar VIP** no painel que abrimos um carrinho para você.'],
-  ['pagamento', /pix|pagamento|pago|comprovante|paguei/, '💳 Envie o **comprovante** (print) e o seu @ aqui no ticket. A staff confere e libera o quanto antes.'],
-  ['bot', /\bbot\b|comando|discord bot/, '🤖 Para pedir um bot, descreva: **o que ele deve fazer**, comandos desejados e referências. Você também pode usar **Pedir bot** no painel.'],
-  ['cargo', /cargo|cor\b|personalizad/, '🎨 Para cargo próprio, diga o **nome** e a **cor em HEX** (ex.: `#ff0066`). Ou use **Cargo próprio** no painel.'],
-  ['source', /source|download|baixar|link|quebrad|off\b|erro/, '📦 Informe o **nome da source** e o que está acontecendo (link quebrado, arquivo com erro, etc.) para a staff verificar.'],
-  ['parceria', /parceria|divulg|parceiro/, '🤝 Para parcerias, envie o **link do seu servidor**, quantidade de membros e o que propõe.'],
-  ['denuncia', /denunci|golpe|ofens|ameaç|spam/, '🚨 Para denúncias, mande **prints/provas** e o @ ou ID do usuário. A staff vai analisar com prioridade.'],
-];
-
-const staffPing = () => (db.config.cargo_staff ? `<@&${db.config.cargo_staff}>` : 'A staff');
-
-function ticketCard(chId) {
-  const t = db.tickets[chId];
-  return box(COLOR,
-    text(`# 🎫 Ticket — ${CATS[t.cat]}\n-# ${BRAND}`), sep(),
-    text(`Olá <@${t.user}>! Explique seu caso com o máximo de detalhes. ${staffPing()} já foi avisada.\n\n**Responsável:** ${t.claimedBy ? `<@${t.claimedBy}>` : 'ninguém ainda'}`), sep(),
-    row(btn('tk:claim', 'Assumir', ButtonStyle.Success, '🙋'), btn('tk:close', 'Fechar', ButtonStyle.Danger, '🔒'))
-  );
+function toast(title, msg) {
+  const t = h('div', { class: 'toast' }, h('div', { class: 'tdot' }), h('div', {}, h('b', {}, title), h('span', {}, msg)));
+  $('#toasts').append(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, 4200);
 }
 
-function cartCard(chId) {
-  const t = db.tickets[chId];
-  return box(OK,
-    text(`# 🛒 Carrinho — VIP\n-# ${BRAND}`), sep(),
-    text(`Olá <@${t.user}>! ${staffPing()} vai te atender aqui para finalizar a compra do **VIP**. Aguarde um momento.`), sep(),
-    row(btn('cart:liberar', 'Liberar VIP', ButtonStyle.Success, '💎'), btn('tk:close', 'Fechar carrinho', ButtonStyle.Danger, '🔒'))
-  );
+/* ---------- estado ---------- */
+let sources = [], cat = 'Todas', q = '', sort = 'recent', cfg = {};
+const api = async (p) => { const r = await fetch(p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
+
+async function load() {
+  try { sources = await api('/api/sources'); $('#offline').hidden = true; }
+  catch { $('#offline').hidden = false; return; }
+  renderAll();
 }
 
-// Cria o canal privado (ticket ou carrinho). Só menciona o cargo da staff e quem abriu.
-async function makeChannel(i, cat, cart) {
-  const existing = Object.entries(db.tickets).find(
-    ([id, t]) => t.user === i.user.id && !!t.cart === cart && i.guild.channels.cache.has(id)
-  );
-  if (existing) return { existing: existing[0] };
+function view() {
+  const t = q.trim().toLowerCase();
+  const list = sources.filter((s) =>
+    (cat === 'Todas' || s.cat === cat) &&
+    (!t || [s.nome, s.desc, s.cat, s.by, s.file && s.file.name].filter(Boolean).join(' ').toLowerCase().includes(t)));
+  const cmp = {
+    recent: (a, b) => b.at - a.at,
+    popular: (a, b) => b.downloads - a.downloads || b.at - a.at,
+    name: (a, b) => a.nome.localeCompare(b.nome, 'pt-BR'),
+  }[sort];
+  return list.sort(cmp);
+}
 
-  const P = PermissionFlagsBits;
-  const overwrites = [
-    { id: i.guild.id, deny: [P.ViewChannel] },
-    { id: i.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.AttachFiles] },
-    { id: i.client.user.id, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.ManageChannels] },
-  ];
-  if (db.config.cargo_staff) {
-    overwrites.push({ id: db.config.cargo_staff, allow: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.AttachFiles] });
-  }
-  const ch = await i.guild.channels.create({
-    name: `${cart ? 'carrinho' : 'ticket'}-${i.user.username}`.slice(0, 90),
-    type: ChannelType.GuildText,
-    parent: db.config.categoria_tickets || null,
-    permissionOverwrites: overwrites,
+/* ---------- render ---------- */
+function action(s) {
+  const dl = !!s.file;
+  return h('a', {
+    class: 'btn pri',
+    href: dl ? `/download/${s.id}` : safeUrl(s.link),
+    download: dl ? s.file.name : null,
+    target: dl ? null : '_blank',
+    rel: dl ? null : 'noopener noreferrer',
+    onclick: (e) => { e.stopPropagation(); if (dl) toast('Download iniciado', s.file.name); },
+  }, svg(dl ? 'dl' : 'ext'), dl ? 'Baixar' : 'Abrir link');
+}
+
+function card(s, i) {
+  const el = h('article', {
+    class: 'card', tabindex: '0', role: 'button', 'data-id': s.id,
+    'aria-label': `Abrir ${s.nome}`, style: `animation-delay:${Math.min(i, 12) * 40}ms`,
+  },
+    h('div', { class: 'top' },
+      h('div', { class: 'ext', style: `--h:${hue(extOf(s) + s.cat)}` }, extOf(s)),
+      h('div', { class: 'ttl' }, h('h3', { title: s.nome }, s.nome), h('span', { class: 'tag' }, s.cat))),
+    h('p', {}, s.desc),
+    h('div', { class: 'meta' },
+      s.file ? h('span', {}, svg('box'), fmtBytes(s.file.size)) : h('span', {}, svg('link'), 'Link externo'),
+      h('span', {}, svg('dl'), nf.format(s.downloads)),
+      h('span', { title: new Date(s.at).toLocaleString('pt-BR') }, svg('clock'), ago(s.at))),
+    h('div', { class: 'foot' }, action(s),
+      h('button', { class: 'btn', type: 'button', onclick: (e) => { e.stopPropagation(); openModal(s.id); } }, svg('eye'), 'Detalhes')));
+  el.addEventListener('click', () => openModal(s.id));
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) openModal(s.id); });
+  el.addEventListener('pointermove', (e) => {
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+    el.style.setProperty('--my', (e.clientY - r.top) + 'px');
   });
-  db.tickets[ch.id] = { user: i.user.id, cat, cart, claimedBy: null, createdAt: Date.now(), staffReplied: false, reminded: false, answered: [] };
-  save();
-  await ch.send({
-    flags: V2,
-    components: [cart ? cartCard(ch.id) : ticketCard(ch.id)],
-    allowedMentions: { users: [i.user.id], roles: db.config.cargo_staff ? [db.config.cargo_staff] : [] },
-  });
-  return { ch };
+  return el;
 }
 
-async function createTicket(i) {
-  await i.deferUpdate();
-  const r = await makeChannel(i, i.values[0], false);
-  if (r.existing) return i.editReply({ components: [box(WARN, text(`⚠️ Você já tem um ticket aberto: <#${r.existing}>`))] });
-  return i.editReply({ components: [box(OK, text(`✅ Ticket criado: ${r.ch}`))] });
+function renderChips() {
+  const counts = new Map();
+  sources.forEach((s) => counts.set(s.cat, (counts.get(s.cat) || 0) + 1));
+  if (cat !== 'Todas' && !counts.has(cat)) cat = 'Todas';
+  const chip = (name, n) => h('button', {
+    class: 'chip', type: 'button', 'aria-pressed': String(cat === name),
+    onclick: () => { cat = name; renderChips(); renderGrid(); },
+  }, name, h('small', {}, String(n)));
+  $('#chips').replaceChildren(chip('Todas', sources.length),
+    ...[...counts].sort((a, b) => b[1] - a[1]).map(([c, n]) => chip(c, n)));
 }
 
-async function openCart(i) {
-  await i.reply({ flags: V2 | EPH, components: [box(COLOR, text('⏳ Criando seu carrinho...'))] });
-  const r = await makeChannel(i, 'carrinho', true);
-  if (r.existing) return i.editReply({ components: [box(WARN, text(`⚠️ Você já tem um carrinho aberto: <#${r.existing}>`))] });
-  return i.editReply({ components: [box(OK, text(`🛒 Carrinho criado: ${r.ch}\nA staff vai te atender por lá.`))] });
+function renderStats() {
+  countTo($('#st-src'), sources.length);
+  countTo($('#st-dl'), sources.reduce((a, s) => a + s.downloads, 0));
+  countTo($('#st-size'), sources.reduce((a, s) => a + (s.file ? s.file.size : 0), 0), fmtBytes);
 }
 
-function openTicketMenu(i) {
-  const menu = new StringSelectMenuBuilder().setCustomId('tk:cat').setPlaceholder('Sobre o que é o ticket?')
-    .addOptions(Object.entries(CATS).filter(([k]) => k !== 'carrinho').map(([v, l]) => ({ label: l, value: v })));
-  return i.reply({ flags: V2 | EPH, components: [box(COLOR, text('🎫 **Escolha o assunto do ticket:**'), row(menu))] });
-}
-
-// Roteia a opção escolhida no menu do painel
-async function openOption(i, v) {
-  if (MODALS[v]) return i.showModal(MODALS[v]());
-  if (v === 'vip') return openCart(i);
-  if (v === 'ticket') return openTicketMenu(i);
-}
-
-async function buildTranscript(ch) {
-  let all = [], last;
-  while (all.length < 2000) {
-    const batch = await ch.messages.fetch({ limit: 100, before: last });
-    if (!batch.size) break;
-    all.push(...batch.values());
-    last = batch.last().id;
-  }
-  return all.reverse().map((m) => {
-    const body = m.content || (m.components?.length ? '[painel do bot]' : '');
-    const files = m.attachments.size ? ' ' + [...m.attachments.values()].map((a) => a.url).join(' ') : '';
-    return `[${m.createdAt.toISOString()}] ${m.author.tag}: ${body}${files}`;
-  }).join('\n');
-}
-
-/* ============================ CLIENT ============================ */
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-});
-
-const web = startWeb({
-  getDb: () => db, save, client, storageDir: STORAGE_DIR, brand: BRAND,
-  port: Number(process.env.PORT) || 3000,
-});
-
-client.once(Events.ClientReady, async () => {
-  console.log(`✅ Online como ${client.user.tag}`);
-  client.user.setActivity(`${BRAND} • /painel`);
-
-  // Descrição do bot (aba "Sobre mim") com "1 Vazamentos" no topo
-  try {
-    const desc = `${BRAND}\n\nBot oficial: pedidos de bot, sugestões, cargos, VIP, tickets e lançamento de sources.\nCréditos: ${BRAND}`;
-    await client.application.edit({ description: desc.slice(0, 400) });
-  } catch (e) { console.warn('Não consegui atualizar a descrição:', e.message); }
-
-  // Registro do /painel
-  const cmd = new SlashCommandBuilder().setName('painel').setDescription(`Painel de configuração do ${BRAND}`)
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false).toJSON();
-  try {
-    await client.application.commands.set([cmd], process.env.GUILD_ID || undefined);
-    console.log('✅ Comando /painel registrado');
-  } catch (e) { console.error('Erro ao registrar comandos:', e); }
-
-  // Lembrete: ticket/carrinho sem resposta da staff em 10 min
-  setInterval(() => {
-    for (const [id, t] of Object.entries(db.tickets)) {
-      if (t.staffReplied || t.reminded || Date.now() - t.createdAt < 10 * 60e3) continue;
-      const ch = client.channels.cache.get(id);
-      if (!ch) { delete db.tickets[id]; save(); continue; }
-      t.reminded = true; save();
-      ch.send({
-        flags: V2,
-        components: [box(WARN, text(`⏰ ${staffPing()}, este ${t.cart ? 'carrinho' : 'ticket'} aguarda atendimento há mais de 10 minutos.`))],
-        allowedMentions: { roles: db.config.cargo_staff ? [db.config.cargo_staff] : [] },
-      }).catch(() => {});
-    }
-  }, 60e3);
-});
-
-// Ticket inteligente: respostas automáticas por palavra-chave (não vale para carrinhos)
-client.on(Events.MessageCreate, async (m) => {
-  if (m.author.bot || !m.guild) return;
-  const t = db.tickets[m.channelId];
-  if (!t) return;
-  if (isStaff(m.member)) { if (!t.staffReplied) { t.staffReplied = true; save(); } return; }
-  if (t.cart) return;
-  const txt = m.content.toLowerCase();
-  for (const [key, re, answer] of FAQ) {
-    if (!t.answered.includes(key) && re.test(txt)) {
-      t.answered.push(key); save();
-      await m.channel.send({
-        flags: V2,
-        components: [box(COLOR, text(`🤖 **Resposta automática**\n${answer}`), text('-# Se não resolver, a staff já vai te atender.'))],
-        allowedMentions: { parse: [] },
-      }).catch(() => {});
-      break;
-    }
-  }
-});
-
-/* ============================ INTERAÇÕES ============================ */
-client.on(Events.InteractionCreate, async (i) => {
-  try {
-    if (i.isChatInputCommand() && i.commandName === 'painel') {
-      if (!isStaff(i.member)) return deny(i, 'Apenas a staff pode usar este comando.');
-      return i.reply({ flags: V2 | EPH, components: [configPanel()] });
-    }
-    if (i.isButton()) return await onButton(i);
-    if (i.isAnySelectMenu()) return await onSelect(i);
-    if (i.isModalSubmit()) return await onModal(i);
-  } catch (e) {
-    console.error(e);
-    const p = { flags: V2 | EPH, components: [box(RED, text('❌ Ocorreu um erro. Verifique as permissões do bot e tente de novo.'))] };
-    if (i.replied || i.deferred) i.followUp(p).catch(() => {}); else i.reply(p).catch(() => {});
-  }
-});
-
-async function onButton(i) {
-  const [ns, a, b] = i.customId.split(':');
-
-  if (ns === 'cfg') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff.');
-    let menu;
-    if (a.startsWith('canal_')) {
-      menu = new ChannelSelectMenuBuilder().setCustomId(`cfgset:${a}`)
-        .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setPlaceholder('Escolha o canal');
-    } else if (a.startsWith('categoria_')) {
-      menu = new ChannelSelectMenuBuilder().setCustomId(`cfgset:${a}`)
-        .setChannelTypes(ChannelType.GuildCategory).setPlaceholder('Escolha a categoria');
-    } else {
-      menu = new RoleSelectMenuBuilder().setCustomId(`cfgset:${a}`).setPlaceholder('Escolha o cargo');
-    }
-    return i.reply({ flags: V2 | EPH, components: [box(COLOR, text(`**${LABELS[a]}**\nSelecione abaixo:`), row(menu))] });
-  }
-
-  if (ns === 'painel' && a === 'publicar') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff.');
-    await i.channel.send({ flags: V2, components: [publicPanel()] });
-    return i.reply({ flags: V2 | EPH, components: [box(OK, text('✅ Painel publicado neste canal!'))] });
-  }
-
-  if (ns === 'src' && a === 'novo') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff.');
-    return i.showModal(modal('m:src', 'Lançar source', [
-      { id: 'nome', label: 'Nome da source', max: 100, ph: 'Ex.: Sistema de loja v2' },
-      { id: 'desc', label: 'Descrição', long: true, max: 1500 },
-      { id: 'cat', label: 'Categoria (ex.: Bot, Script, Site)', required: false, max: 30, ph: 'Bot' },
-      { id: 'link', label: 'Link para baixar (vazio = enviar arquivo)', required: false, max: 400, ph: 'https://...' },
-    ]));
-  }
-
-  if (ns === 'srcdel') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff pode remover sources.');
-    const s = db.sources[a];
-    if (!s) return deny(i, 'Essa source já foi removida.');
-    if (s.file) fs.rm(path.join(STORAGE_DIR, s.file.stored), { force: true }, () => {});
-    delete db.sources[a]; save();
-    web.broadcast('remove', a);
-    return i.update({ components: [box(RED, text(`🗑️ **${s.nome}** foi removida por <@${i.user.id}>.`))], allowedMentions: { parse: [] } });
-  }
-
-  // Compatibilidade com painéis antigos (botões)
-  if (ns === 'req') return openOption(i, a);
-
-  if (ns === 'rq') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff pode decidir pedidos.');
-    const r = db.requests[b];
-    if (!r || r.status !== 'pendente') return deny(i, 'Esse pedido já foi resolvido.');
-    const ok = a === 'ok';
-    if (ok && r.kind === 'cargo') {
-      const m = await i.guild.members.fetch(r.user).catch(() => null);
-      if (m) {
-        const role = await i.guild.roles.create({ name: r.data.nome, color: r.data.cor, reason: `Cargo próprio - ${BRAND}` });
-        await m.roles.add(role);
-      }
-    }
-    r.status = ok ? 'aprovado' : 'recusado'; r.by = i.user.id; save();
-    await i.update({ components: [requestCard(b)], allowedMentions: { parse: [] } });
-    const u = await client.users.fetch(r.user).catch(() => null);
-    u?.send(`${ok ? '✅' : '❌'} Seu pedido (**${KIND[r.kind].title}**) foi **${r.status}** no ${BRAND}.`).catch(() => {});
+function renderGrid() {
+  const list = view(), box = $('#list');
+  $('#count').textContent = sources.length ? `${nf.format(list.length)} ${list.length === 1 ? 'resultado' : 'resultados'}` : '';
+  if (!list.length) {
+    const none = !sources.length;
+    box.replaceChildren(h('div', { class: 'empty' },
+      h('div', { class: 'ic' }, svg('empty')),
+      h('h3', {}, none ? 'Nenhuma source por aqui ainda' : 'Nada encontrado'),
+      h('p', {}, none ? 'Assim que a staff lançar uma pelo bot no Discord, ela aparece aqui na hora.' : 'Tente outro termo ou limpe os filtros.'),
+      none ? null : h('button', { class: 'btn', type: 'button', onclick: () => { q = ''; cat = 'Todas'; $('#q').value = ''; renderChips(); renderGrid(); } }, 'Limpar filtros')));
     return;
   }
-
-  if (ns === 'sug') {
-    const r = db.requests[b];
-    if (!r) return deny(i, 'Sugestão não encontrada.');
-    r.votes ||= {};
-    const v = a === 'up' ? 1 : -1;
-    if (r.votes[i.user.id] === v) delete r.votes[i.user.id]; else r.votes[i.user.id] = v;
-    save();
-    return i.update({ components: [sugCard(b)], allowedMentions: { parse: [] } });
-  }
-
-  if (ns === 'cart' && a === 'liberar') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff pode liberar o VIP.');
-    const t = db.tickets[i.channelId];
-    if (!t) return deny(i, 'Este canal não é um carrinho ativo.');
-    if (!db.config.cargo_vip) return deny(i, 'Defina o **Cargo VIP** no /painel primeiro.');
-    const m = await i.guild.members.fetch(t.user).catch(() => null);
-    if (!m) return deny(i, 'Não encontrei o membro no servidor.');
-    await m.roles.add(db.config.cargo_vip);
-    return i.reply({
-      flags: V2,
-      components: [box(OK, text(`💎 VIP liberado para <@${t.user}> por <@${i.user.id}>!`))],
-      allowedMentions: { users: [t.user] },
-    });
-  }
-
-  if (ns === 'tk') {
-    if (a === 'abrir') return openTicketMenu(i);
-    const t = db.tickets[i.channelId];
-    if (!t) return deny(i, 'Este canal não é um ticket/carrinho ativo.');
-    if (a === 'claim') {
-      if (!isStaff(i.member)) return deny(i, 'Apenas a staff pode assumir.');
-      t.claimedBy = i.user.id; t.staffReplied = true; save();
-      await i.update({ components: [ticketCard(i.channelId)], allowedMentions: { parse: [] } });
-      return i.channel.send({ flags: V2, components: [box(OK, text(`🙋 <@${i.user.id}> assumiu este ticket.`))], allowedMentions: { parse: [] } });
-    }
-    if (a === 'close') {
-      if (!isStaff(i.member) && i.user.id !== t.user) return deny(i, 'Sem permissão para fechar.');
-      return i.reply({
-        flags: V2 | EPH,
-        components: [box(WARN, text('🔒 Tem certeza que deseja fechar? O canal será apagado e a transcrição salva nos logs.'),
-          row(btn('tk:confirm', 'Confirmar fechamento', ButtonStyle.Danger, '🔒')))],
-      });
-    }
-    if (a === 'confirm') {
-      if (!isStaff(i.member) && i.user.id !== t.user) return deny(i, 'Sem permissão para fechar.');
-      await i.update({ components: [box(WARN, text('🔒 Fechando em 5 segundos...'))] });
-      const logId = db.config.canal_logs;
-      const log = logId && (await i.guild.channels.fetch(logId).catch(() => null));
-      if (log) {
-        const txt = await buildTranscript(i.channel);
-        const name = `transcript-${i.channel.name}.txt`;
-        await log.send({
-          flags: V2,
-          components: [box(COLOR,
-            text(`# 📜 ${t.cart ? 'Carrinho' : 'Ticket'} fechado\n**Canal:** ${i.channel.name}\n**Dono:** <@${t.user}>\n**Assunto:** ${CATS[t.cat]}\n**Responsável:** ${t.claimedBy ? `<@${t.claimedBy}>` : '—'}\n**Fechado por:** <@${i.user.id}>`),
-            new FileBuilder().setURL(`attachment://${name}`),
-            text(`-# ${BRAND}`))],
-          files: [new AttachmentBuilder(Buffer.from(txt || 'vazio'), { name })],
-          allowedMentions: { parse: [] },
-        }).catch(console.error);
-      }
-      delete db.tickets[i.channelId]; save();
-      const ch = i.channel;
-      setTimeout(() => ch.delete('Fechado').catch(() => {}), 5000);
-      return;
-    }
-  }
+  box.replaceChildren(...list.map(card));
 }
 
-async function onSelect(i) {
-  const [ns, a] = i.customId.split(':');
+function renderAll() { renderChips(); renderStats(); renderGrid(); }
 
-  // Menu do painel público
-  if (ns === 'panel' && a === 'menu') {
-    const v = i.values[0];
-    await openOption(i, v);
-    // Reseta o menu para a opção escolhida não ficar marcada
-    i.message.edit({ flags: V2, components: [publicPanel()] }).catch(() => {});
-    return;
-  }
+function skeleton() { $('#list').replaceChildren(...Array.from({ length: 6 }, () => h('div', { class: 'sk' }))); }
 
-  if (ns === 'cfgset') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff.');
-    const v = i.values[0];
-    db.config[a] = v; save();
-    const mention = a.startsWith('cargo_') ? `<@&${v}>` : `<#${v}>`;
-    return i.update({
-      components: [box(OK, text(`✅ **${LABELS[a]}** definido para ${mention}\n-# Rode /painel de novo para ver o resumo atualizado.`))],
-      allowedMentions: { parse: [] },
-    });
-  }
+/* ---------- modal ---------- */
+const dlg = $('#modal');
+const fact = (k, v) => h('div', {}, h('dt', {}, k), h('dd', { title: v }, v));
 
-  if (ns === 'tk' && a === 'cat') return createTicket(i);
+function openModal(id, push = true) {
+  const s = sources.find((x) => x.id === id);
+  if (!s) return;
+  $('#sheet').replaceChildren(
+    h('button', { class: 'x', type: 'button', 'aria-label': 'Fechar', onclick: () => dlg.close() }, svg('x')),
+    h('div', { class: 'top' },
+      h('div', { class: 'ext lg', style: `--h:${hue(extOf(s) + s.cat)}` }, extOf(s)),
+      h('div', { class: 'ttl' }, h('h2', {}, s.nome), h('span', { class: 'tag' }, s.cat))),
+    h('div', { class: 'desc' }, ...linkify(s.desc)),
+    h('dl', { class: 'facts' },
+      fact('Tamanho', s.file ? fmtBytes(s.file.size) : 'Link externo'),
+      fact('Downloads', nf.format(s.downloads)),
+      fact('Publicado', ago(s.at)),
+      fact('Por', s.by),
+      s.file ? fact('Arquivo', s.file.name) : null),
+    h('div', { class: 'actions' }, action(s),
+      h('button', {
+        class: 'btn', type: 'button',
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(`${location.origin}/#${s.id}`); toast('Link copiado', s.nome); }
+          catch { toast('Não foi possível copiar', 'Copie o endereço da barra do navegador.'); }
+        },
+      }, svg('copy'), 'Copiar link')));
+  if (!dlg.open) dlg.showModal();
+  if (push) history.replaceState(null, '', '#' + id);
+}
+dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+dlg.addEventListener('close', () => history.replaceState(null, '', location.pathname + location.search));
+function fromHash() {
+  const id = location.hash.slice(1);
+  if (id) openModal(id, false); else if (dlg.open) dlg.close();
+}
+window.addEventListener('hashchange', fromHash);
+
+/* ---------- status do bot ---------- */
+function setPill(on, ping) {
+  const p = $('#pill');
+  p.className = 'pill ' + (on ? 'on' : 'off');
+  $('#pilltxt').textContent = on ? (ping >= 0 ? `Bot online · ${ping}ms` : 'Bot online') : 'Bot offline';
+}
+async function status() {
+  try {
+    const s = await api('/api/status');
+    setPill(s.online, s.ping);
+    if (s.members != null) countTo($('#st-mem'), s.members);
+  } catch { setPill(false); }
 }
 
-async function onModal(i) {
-  const f = (k) => i.fields.getTextInputValue(k).trim();
-
-  if (i.customId === 'm:bot') {
-    return sendRequest(i, 'bot', [['Descrição do bot', f('desc')], ['O que ele faz', f('faz')], ['Algo mais', f('mais') || '—']]);
-  }
-
-  if (i.customId === 'm:sug') {
-    const chId = db.config.canal_sugestoes;
-    const ch = chId && (await i.guild.channels.fetch(chId).catch(() => null));
-    if (!ch) return deny(i, 'Canal de sugestões não configurado.');
-    const id = Date.now().toString(36) + Math.floor(Math.random() * 99);
-    db.requests[id] = { kind: 'sug', user: i.user.id, fields: [['Sugestão', f('sug')]], votes: {}, status: 'aberta' };
-    save();
-    await ch.send({ flags: V2, components: [sugCard(id)], allowedMentions: { parse: [] } });
-    return i.reply({ flags: V2 | EPH, components: [box(OK, text('✅ Sugestão enviada! Obrigado por ajudar o servidor.'))] });
-  }
-
-  if (i.customId === 'm:cargo') {
-    const hex = f('cor').replace('#', '');
-    if (!/^[0-9a-f]{6}$/i.test(hex)) return deny(i, 'Cor inválida. Use HEX, ex.: `#ff0066`.');
-    return sendRequest(i, 'cargo', [['Nome do cargo', f('nome')], ['Cor', `#${hex}`]], { nome: f('nome'), cor: parseInt(hex, 16) });
-  }
-
-  if (i.customId === 'm:src') {
-    if (!isStaff(i.member)) return deny(i, 'Apenas a staff.');
-    const nome = f('nome'), desc = f('desc'), cat = f('cat'), link = f('link');
-    if (!db.config.canal_sources) return deny(i, 'Configure o canal de sources no /painel primeiro.');
-
-    if (link) {
-      const clean = cleanUrl(link);
-      if (!clean) return deny(i, 'Link inválido. Use o link completo (https://...), sem espaços e com no máximo 512 caracteres.');
-      try { await publishSource(i.guild, i.user, { nome, desc, cat, link: clean }); }
-      catch (e) { console.error(e); return deny(i, `Falhou ao publicar: ${e.message}`); }
-      return i.reply({ flags: V2 | EPH, components: [box(OK, text('🚀 Source lançada!'))] });
-    }
-
-    await i.reply({
-      flags: V2 | EPH,
-      components: [box(COLOR, text('📎 Envie o **arquivo** aqui neste canal nos próximos **2 minutos**.'))],
-    });
-    const col = i.channel.createMessageCollector({ filter: (m) => m.author.id === i.user.id, time: 120000, max: 1 });
-    col.on('collect', async (m) => {
-      const file = m.attachments.first();
-      if (!file) {
-        return i.followUp({ flags: V2 | EPH, components: [box(WARN, text('Lançamento cancelado (nenhum arquivo enviado).'))] });
-      }
-      try {
-        if (PUBLIC_URL) await i.followUp({ flags: V2 | EPH, components: [box(COLOR, text('⏳ Hospedando o arquivo no site...'))] });
-        await publishSource(i.guild, i.user, { nome, desc, cat, file });
-        await m.delete().catch(() => {});
-        await i.followUp({ flags: V2 | EPH, components: [box(OK, text('🚀 Source lançada com o arquivo!'))] });
-      } catch (e) {
-        console.error(e);
-        await i.followUp({ flags: V2 | EPH, components: [box(RED, text(`❌ Falhou ao publicar: ${e.message}`))] });
-      }
-    });
-    col.on('end', (c, reason) => {
-      if (reason === 'time') i.followUp({ flags: V2 | EPH, components: [box(WARN, text('⏰ Tempo esgotado. Clique em **Lançar source** de novo.'))] }).catch(() => {});
-    });
-  }
+/* ---------- tempo real ---------- */
+function flash(id) {
+  const el = document.querySelector(`.card[data-id="${id}"]`);
+  if (!el) return;
+  el.classList.add('fresh');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  setTimeout(() => el.classList.remove('fresh'), 6000);
+}
+function live() {
+  if (!window.EventSource) return setInterval(load, 20000);
+  const es = new EventSource('/api/stream');
+  let t; const refresh = () => { clearTimeout(t); t = setTimeout(load, 600); };
+  es.addEventListener('new', async (e) => {
+    const { id } = JSON.parse(e.data);
+    await load();
+    const s = sources.find((x) => x.id === id);
+    if (s) { toast('Nova source publicada', s.nome); flash(id); }
+  });
+  es.addEventListener('remove', refresh);
+  es.addEventListener('dl', refresh);
+  es.onopen = () => { if (!$('#offline').hidden) load(); };
 }
 
-process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
-client.login(process.env.TOKEN);
+/* ---------- eventos ---------- */
+let qt;
+$('#q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { q = e.target.value; renderGrid(); }, 80); });
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; q = ''; renderGrid(); e.target.blur(); } });
+$('#sort').addEventListener('change', (e) => { sort = e.target.value; renderGrid(); });
+addEventListener('keydown', (e) => {
+  if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && !dlg.open) { e.preventDefault(); $('#q').focus(); }
+});
+setInterval(() => { if (!$('#offline').hidden) load(); }, 10000);
+setInterval(status, 30000);
+
+/* ---------- init ---------- */
+(async function init() {
+  $('#yr').textContent = new Date().getFullYear();
+  skeleton();
+  const [c] = await Promise.all([api('/api/config').catch(() => ({})), load(), status()]);
+  cfg = c || {};
+  if (cfg.invite) { const a = $('#invite'); a.href = safeUrl(cfg.invite); a.hidden = false; }
+  if (cfg.contact) {
+    const a = $('#contact');
+    a.href = /^https?:\/\//i.test(cfg.contact) ? cfg.contact : `mailto:${cfg.contact}`;
+    $('#contactline').hidden = false;
+  }
+  if ($('#offline').hidden === false) renderAll();
+  fromHash();
+  live();
+})();
+</script>
+</body>
+</html>
