@@ -112,7 +112,12 @@ function startWeb({ getDb, save, client, storageDir, brand, port }) {
     res.download(filePath, s.file.name);
   });
 
+  app.get('/health', (req, res) => res.type('text').send('ok'));
+
   /* ---------- site estático ---------- */
+  if (!fs.existsSync(path.join(__dirname, 'site', 'index.html'))) {
+    console.error('❌ site/index.html NÃO encontrado. A pasta "site" foi enviada para o GitHub?');
+  }
   app.use(express.static(path.join(__dirname, 'site'), { etag: true, maxAge: 0 }));
   app.use((req, res) => res.status(404).type('text').send('Página não encontrada.'));
 
