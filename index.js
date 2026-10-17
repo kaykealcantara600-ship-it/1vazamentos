@@ -18,10 +18,26 @@ const COLOR = 0x5865f2, OK = 0x57f287, RED = 0xed4245, WARN = 0xfee75c;
 const V2 = MessageFlags.IsComponentsV2;
 const EPH = MessageFlags.Ephemeral;
 
+// Onde ficam data.json e os arquivos: no Railway usa o Volume automaticamente (RAILWAY_VOLUME_MOUNT_PATH)
+const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
+
 // Site de downloads (sincronizado com o bot)
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
-const STORAGE_DIR = path.join(__dirname, 'storage');
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').trim().replace(/\/+$/, '');
+
+// Discord só aceita em botão de link: http(s), domínio real (não localhost/IP local) e até 512 caracteres
+function cleanUrl(u) {
+  try {
+    const x = new URL(String(u).trim());
+    if (!/^https?:$/.test(x.protocol)) return null;
+    if (!x.hostname.includes('.') || /^(localhost|127\.|10\.|192\.168\.)/i.test(x.hostname)) return null;
+    return x.href.length <= 512 ? x.href : null;
+  } catch { return null; }
+}
+const PUBLIC_OK = !!PUBLIC_URL && !!cleanUrl(PUBLIC_URL);
+if (PUBLIC_URL && !PUBLIC_OK) console.warn('⚠️ PUBLIC_URL é local ou inválida: o site funciona, mas os botões de link no Discord ficam ocultos.');
+const STORAGE_DIR = path.join(DATA_DIR, 'storage');
 fs.mkdirSync(STORAGE_DIR, { recursive: true });
+console.log(`💾 Dados salvos em: ${DATA_DIR}`);
 const MAX_FILE_BYTES = (Number(process.env.MAX_FILE_MB) || 200) * 1024 * 1024;
 
 // Valores fixos (usados se ainda não foram definidos pelo /painel)
@@ -31,7 +47,7 @@ const DEFAULTS = {
 };
 
 /* ============================ BANCO (JSON) ============================ */
-const DB_PATH = path.join(__dirname, 'data.json');
+const DB_PATH = path.join(DATA_DIR, 'data.json');
 let db = { config: {}, requests: {}, tickets: {}, sources: {} };
 try { db = { ...db, ...JSON.parse(fs.readFileSync(DB_PATH, 'utf8')) }; } catch {}
 const save = () => fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
@@ -236,9 +252,9 @@ async function publishSource(guild, user, { nome, desc, cat, link, file }) {
   }
 
   const buttons = [];
-  if (rec.file) buttons.push(new ButtonBuilder().setLabel('Baixar').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/download/${id}`).setEmoji('⬇️'));
+  if (rec.file && PUBLIC_OK) buttons.push(new ButtonBuilder().setLabel('Baixar').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/download/${id}`).setEmoji('⬇️'));
   if (link) buttons.push(new ButtonBuilder().setLabel('Baixar').setStyle(ButtonStyle.Link).setURL(link).setEmoji('⬇️'));
-  if (PUBLIC_URL && (rec.file || link)) buttons.push(new ButtonBuilder().setLabel('Ver no site').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/#${id}`).setEmoji('🌐'));
+  if (PUBLIC_OK && (rec.file || link)) buttons.push(new ButtonBuilder().setLabel('Ver no site').setStyle(ButtonStyle.Link).setURL(`${PUBLIC_URL}/#${id}`).setEmoji('🌐'));
   buttons.push(btn(`srcdel:${id}`, 'Remover', ButtonStyle.Danger, '🗑️'));
 
   const info = [`**Categoria:** ${rec.cat}`];
@@ -393,7 +409,7 @@ client.once(Events.ClientReady, async () => {
 
   // Descrição do bot (aba "Sobre mim") com "1 Vazamentos" no topo
   try {
-    const desc = `${BRAND}\n\nBot desenvolvido pela: 1 vazamentos feita para quem deseja pegar source free e para um espaço mais limpo.: ${BRAND}`;
+    const desc = `${BRAND}\n\nBot oficial: pedidos de bot, sugestões, cargos, VIP, tickets e lançamento de sources.\nCréditos: ${BRAND}`;
     await client.application.edit({ description: desc.slice(0, 400) });
   } catch (e) { console.warn('Não consegui atualizar a descrição:', e.message); }
 
@@ -650,8 +666,10 @@ async function onModal(i) {
     if (!db.config.canal_sources) return deny(i, 'Configure o canal de sources no /painel primeiro.');
 
     if (link) {
-      if (!/^https?:\/\//i.test(link)) return deny(i, 'O link precisa começar com http:// ou https://');
-      await publishSource(i.guild, i.user, { nome, desc, cat, link });
+      const clean = cleanUrl(link);
+      if (!clean) return deny(i, 'Link inválido. Use o link completo (https://...), sem espaços e com no máximo 512 caracteres.');
+      try { await publishSource(i.guild, i.user, { nome, desc, cat, link: clean }); }
+      catch (e) { console.error(e); return deny(i, `Falhou ao publicar: ${e.message}`); }
       return i.reply({ flags: V2 | EPH, components: [box(OK, text('🚀 Source lançada!'))] });
     }
 
