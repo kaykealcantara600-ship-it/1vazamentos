@@ -1,0 +1,14 @@
+{
+  "config": {
+    "canal_sources": "1560820458549678110",
+    "canal_pedidos": "1560822113462521927",
+    "categoria_tickets": "1560830408155865088",
+    "cargo_staff": "1560830473973014578",
+    "canal_logs": "1560830547142639626",
+    "canal_sugestoes": "1560832141628285008",
+    "canal_cargos": "1560830547142639626"
+  },
+  "requests": {},
+  "tickets": {},
+  "sources": {}
+}
